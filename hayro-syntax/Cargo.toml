@@ -16,6 +16,11 @@ itertools = { workspace = true }
 once_cell = { workspace = true }
 jpeg2k = { workspace = true, optional = true }
 flate2 = { workspace = true }
+sha2 = { workspace = true }
+aes = { workspace = true }
+cbc = { workspace = true }
+md5 = { workspace = true }
+stringprep = { version = "0.1" }
 
 [features]
 default = ["jpeg2000"]

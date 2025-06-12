@@ -79,7 +79,7 @@ impl<'a> Dict<'a> {
     }
 
     /// Returns an iterator over all keys in the dictionary.
-    pub fn keys(&self) -> impl Iterator<Item = Name> {
+    pub fn keys(&self) -> impl Iterator<Item = Name<'a>> {
         self.0.offsets.keys().cloned()
     }
 
@@ -274,6 +274,7 @@ pub mod keys {
     key!(ASCII85_DECODE_ABBREVIATION, b"A85");
     key!(ATTACHED, b"Attached");
     key!(AUTHOR, b"Author");
+    key!(AUTH_EVENT, b"AuthEvent");
     key!(AVG_WIDTH, b"AvgWidth");
 
     // B

@@ -12,6 +12,7 @@ under the Apache 2.0 license:
 The following parts of code have been adapted from [pdf-rs](https://github.com/pdf-rs/pdf), available under the
 Apache 2.0 license:
 - The ASCII85 decoder.
+- The logic for decrypting PDFs.
 
 The following parts of code have been adapted/translated from the [CFFDump](https://github.com/janpe2/CFFDump/) utility tool, available under the Apache 2.0 license:
 - The Type1 font parser.

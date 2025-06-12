@@ -2,10 +2,10 @@
 
 use crate::PdfData;
 use crate::data::Data;
-use crate::object::ObjectIdentifier;
+use crate::object::{string, ObjectIdentifier};
 use crate::object::array::Array;
 use crate::object::dict::Dict;
-use crate::object::dict::keys::{FIRST, INDEX, N, PAGES, PREV, ROOT, SIZE, W, XREF_STM};
+use crate::object::dict::keys::{ENCRYPT, FIRST, ID, INDEX, N, PAGES, PREV, ROOT, SIZE, W, XREF_STM};
 use crate::object::indirect::IndirectObject;
 use crate::object::stream::Stream;
 use crate::object::{Object, ObjectLike};
@@ -15,6 +15,7 @@ use rustc_hash::FxHashMap;
 use std::cmp::max;
 use std::iter;
 use std::sync::{Arc, RwLock};
+use crate::decrypt::{CryptDict, Decoder};
 
 pub(crate) const XREF_ENTRY_LEN: usize = 20;
 
@@ -99,8 +100,19 @@ impl XRef {
         let root = trailer_dict.get::<Dict>(ROOT)?;
         let pages_ref = root.get_ref(PAGES)?;
 
+        let mut decoder = None;
+        if let Some(crypt) = trailer_dict.get::<Dict>(ENCRYPT) {
+            let crypt_dict = CryptDict::from_dict(&crypt)?;
+            let key = {
+                let id = trailer_dict.get::<Array>(ID)?;
+                id.flex_iter().next::<string::String>()?.get().to_vec()
+            };
+            decoder = Some(Decoder::from_password(&crypt_dict, &key, b"").ok()?);
+        }
+
         let td = TrailerData {
             pages_ref: pages_ref.into(),
+            decoder
         };
 
         match &mut xref.0 {
@@ -128,6 +140,26 @@ impl XRef {
         match &self.0 {
             Inner::Dummy => unreachable!(),
             Inner::Some { trailer_data, .. } => trailer_data,
+        }
+    }
+    
+    pub(crate) fn needs_decryption(&self) -> bool {
+        match &self.0 {
+            Inner::Dummy => false,
+            Inner::Some { trailer_data, .. } => trailer_data.decoder.is_some(),
+        }
+    }
+    
+    pub(crate) fn decrypt<'b>(&self, id: ObjectIdentifier, data: &'b mut [u8]) -> Option<&'b [u8]> {
+        match &self.0 {
+            Inner::Dummy => Some(data),
+            Inner::Some { trailer_data, .. } => {
+                if let Some(decoder) = trailer_data.decoder.as_ref() {
+                    decoder.decrypt(id, data).ok()
+                }   else {
+                    Some(data)
+                }
+            }
         }
     }
 
@@ -268,15 +300,17 @@ struct SomeRepr {
     repaired: bool,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct TrailerData {
     pub pages_ref: ObjectIdentifier,
+    pub decoder: Option<Decoder>,
 }
 
 impl TrailerData {
     pub fn dummy() -> Self {
         Self {
             pages_ref: ObjectIdentifier::new(0, 0),
+            decoder: None,
         }
     }
 }

@@ -77,6 +77,7 @@ pub mod reader;
 pub mod trivia;
 pub(crate) mod util;
 pub mod xref;
+mod decrypt;
 
 const NUM_SLOTS: usize = 10000;
 
