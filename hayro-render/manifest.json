@@ -912,5 +912,17 @@
   {
     "id": "issue11",
     "file": "pdfs/issue11.pdf"
+  },
+  {
+    "id": "encrypted_aes_128",
+    "file": "pdfs/encrypted_aes_128.pdf"
+  },
+  {
+    "id": "encrypted_rc4_rev2",
+    "file": "pdfs/encrypted_rc4_rev2.pdf"
+  },
+  {
+    "id": "encrypted_rc4_rev3",
+    "file": "pdfs/encrypted_rc4_rev3.pdf"
   }
 ]
