@@ -5,7 +5,7 @@ use crate::object::array::Array;
 use crate::object::dict::Dict;
 use crate::object::dict::keys::{DECODE_PARMS, DP, F, FILTER, LENGTH};
 use crate::object::name::Name;
-use crate::object::{Object, ObjectLike};
+use crate::object::{Object, ObjectIdentifier, ObjectLike};
 use crate::reader::{Readable, Reader, ReaderContext, Skippable};
 use crate::util::OptionLog;
 use log::{info, warn};
@@ -16,6 +16,7 @@ use std::fmt::{Debug, Formatter};
 pub struct Stream<'a> {
     dict: Dict<'a>,
     data: &'a [u8],
+    obj_id: Option<ObjectIdentifier>
 }
 
 impl<'a> Stream<'a> {
@@ -40,18 +41,30 @@ impl<'a> Stream<'a> {
     /// Return the decoded data of the stream, and return image metadata in case
     /// the data stream is a JPX stream.
     pub fn decoded_image(&self) -> Option<FilterResult> {
+        let xref = self.dict.ctx().xref;
+        // Inline images won't have encryption, so check whether object ID is `Some`.
+        let mut needs_decryption = xref.needs_decryption() && self.obj_id.is_some();
+        
         if let Some(filter) = self
             .dict
             .get::<Name>(F)
             .or_else(|| self.dict.get::<Name>(FILTER))
             .and_then(|n| Filter::from_name(n))
         {
+            needs_decryption &= filter != Filter::Crypt;
+            
             let params = self
                 .dict
                 .get::<Dict>(DP)
-                .or_else(|| self.dict.get::<Dict>(DECODE_PARMS));
+                .or_else(|| self.dict.get::<Dict>(DECODE_PARMS)).unwrap_or_default();
 
-            filter.apply(self.data, params.clone().unwrap_or_default())
+            if needs_decryption {
+                let mut data = self.data.to_vec();
+                
+                filter.apply(xref.decrypt(self.obj_id?, &mut data,)?, params)
+            }   else {
+                filter.apply(self.data, params)
+            }
         } else if let Some(filters) = self
             .dict
             .get::<Array>(F)
@@ -67,8 +80,20 @@ impl<'a> Stream<'a> {
                 .or_else(|| self.dict.get::<Array>(DECODE_PARMS))
                 .map(|a| a.iter::<Object>().collect())
                 .unwrap_or(vec![]);
+            
+            needs_decryption &= filters.first().map(|e| *e != Filter::Crypt).unwrap_or(true);
 
             let mut current: Option<FilterResult> = None;
+            
+            if needs_decryption {
+                let mut data = self.data.to_vec();
+                
+                current = Some(FilterResult {
+                    data: xref.decrypt(self.obj_id?, &mut data)?.to_vec(),
+                    color_space: None,
+                    bits_per_component: None,
+                })
+            }
 
             for i in 0..filters.len() {
                 let params = params.get(i).and_then(|p| p.clone().cast::<Dict>());
@@ -89,16 +114,24 @@ impl<'a> Stream<'a> {
                 bits_per_component: None,
             }))
         } else {
+            let data = if needs_decryption {
+                let mut data = self.data.to_vec();
+
+                xref.decrypt(self.obj_id?, &mut data,)?.to_vec()
+            }   else {
+                self.data.to_vec()
+            };
+            
             Some(FilterResult {
-                data: self.data.to_vec(),
+                data,
                 color_space: None,
                 bits_per_component: None,
             })
         }
     }
 
-    pub(crate) fn from_raw(data: &'a [u8], dict: Dict<'a>) -> Self {
-        Self { dict, data }
+    pub(crate) fn from_raw(data: &'a [u8], dict: Dict<'a>, obj_id: Option<ObjectIdentifier>) -> Self {
+        Self { dict, data, obj_id }
     }
 }
 
@@ -128,18 +161,18 @@ impl<'a> Readable<'a> for Stream<'a> {
         }
 
         let offset = r.offset();
-        parse_proper(r, &dict)
+        parse_proper(r, &dict, ctx)
             .or_else(|| {
                 warn!("failed to parse stream, trying to parse it manually");
 
                 r.jump(offset);
-                parse_fallback(r, &dict)
+                parse_fallback(r, &dict, ctx)
             })
             .error_none("was unable to manually parse the stream")
     }
 }
 
-fn parse_proper<'a>(r: &mut Reader<'a>, dict: &Dict<'a>) -> Option<Stream<'a>> {
+fn parse_proper<'a>(r: &mut Reader<'a>, dict: &Dict<'a>, ctx: ReaderContext) -> Option<Stream<'a>> {
     let length = dict.get::<u32>(LENGTH)?;
 
     r.skip_white_spaces_and_comments();
@@ -152,10 +185,11 @@ fn parse_proper<'a>(r: &mut Reader<'a>, dict: &Dict<'a>) -> Option<Stream<'a>> {
     Some(Stream {
         data,
         dict: dict.clone(),
+        obj_id: ctx.obj_number
     })
 }
 
-fn parse_fallback<'a>(r: &mut Reader<'a>, dict: &Dict<'a>) -> Option<Stream<'a>> {
+fn parse_fallback<'a>(r: &mut Reader<'a>, dict: &Dict<'a>, ctx: ReaderContext) -> Option<Stream<'a>> {
     while r.forward_tag(b"stream").is_none() {
         r.read_byte()?;
     }
@@ -181,6 +215,7 @@ fn parse_fallback<'a>(r: &mut Reader<'a>, dict: &Dict<'a>) -> Option<Stream<'a>>
             let stream = Stream {
                 data,
                 dict: dict.clone(),
+                obj_id: ctx.obj_number
             };
 
             // Try decoding the stream to see if it is valid.
