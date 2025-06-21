@@ -1,3 +1,4 @@
+use crate::crypto::aes::{AES128Cipher, AES256Cipher};
 use crate::crypto::cipher_transform::CipherTransformFactory;
 use crate::crypto::rc4::ARCFourCipher;
 use crate::object::ObjectIdentifier;
@@ -74,7 +75,9 @@ impl CryptDict {
 #[derive(Debug, Clone, Copy)]
 pub enum CryptMethod {
     None,
-    V2,
+    V2,    // RC4
+    AESV2, // AES-128
+    AESV3, // AES-256
 }
 
 impl<'a> CryptMethod {
@@ -82,6 +85,8 @@ impl<'a> CryptMethod {
         match name.as_str() {
             "None" => Some(CryptMethod::None),
             "V2" => Some(CryptMethod::V2),
+            "AESV2" => Some(CryptMethod::AESV2),
+            "AESV3" => Some(CryptMethod::AESV3),
             _ => None,
         }
     }
@@ -204,6 +209,7 @@ impl Decoder {
                 Ok(data)
             }
             CryptMethod::V2 => {
+                // RC4 decryption (Algorithm 1-2)
                 // b) Build object key
                 let mut key = [0; 16 + 5];
                 let n = self.key().len();
@@ -219,6 +225,71 @@ impl Decoder {
                 let decrypted = cipher.decrypt_block(data);
                 data.copy_from_slice(&decrypted);
                 Ok(data)
+            }
+            CryptMethod::AESV2 => {
+                // AES-128 decryption (Algorithm 4)
+                if data.len() < 16 {
+                    return Err(DecryptError::DecryptionFailure);
+                }
+
+                // Extract IV (first 16 bytes)
+                let mut iv = [0u8; 16];
+                iv.copy_from_slice(&data[..16]);
+                let encrypted_data = &data[16..];
+
+                // Build object key for AES
+                let mut key_data = [0; 16 + 5 + 4]; // +4 for "sAlT"
+                let n = self.key().len();
+                key_data[..n].copy_from_slice(self.key());
+                key_data[n..n + 3].copy_from_slice(&id.obj_num.to_le_bytes()[..3]);
+                key_data[n + 3..n + 5].copy_from_slice(&id.gen_num.to_le_bytes()[..2]);
+                key_data[n + 5..n + 9].copy_from_slice(b"sAlT"); // AES salt
+
+                // Hash the key
+                let key_hash = *md5::compute(&key_data[..n + 9]);
+                let mut aes_key = [0u8; 16];
+                aes_key.copy_from_slice(&key_hash[..(n + 5).min(16)]);
+
+                // Decrypt with AES-128 CBC
+                let cipher = AES128Cipher::new(&aes_key);
+                let decrypted = cipher.decrypt_cbc(encrypted_data, &iv);
+
+                if decrypted.len() <= data.len() {
+                    data[..decrypted.len()].copy_from_slice(&decrypted);
+                    Ok(&data[..decrypted.len()])
+                } else {
+                    Err(DecryptError::DecryptionFailure)
+                }
+            }
+            CryptMethod::AESV3 => {
+                // AES-256 decryption (Algorithm 5/6)
+                if data.len() < 16 {
+                    return Err(DecryptError::DecryptionFailure);
+                }
+
+                // Extract IV (first 16 bytes)
+                let mut iv = [0u8; 16];
+                iv.copy_from_slice(&data[..16]);
+                let encrypted_data = &data[16..];
+
+                // For AES-256, use the file-level key directly (no per-object derivation)
+                if self.key().len() < 32 {
+                    return Err(DecryptError::DecryptionFailure);
+                }
+
+                let mut aes_key = [0u8; 32];
+                aes_key.copy_from_slice(&self.key()[..32]);
+
+                // Decrypt with AES-256 CBC
+                let cipher = AES256Cipher::new(&aes_key);
+                let decrypted = cipher.decrypt_cbc(encrypted_data, &iv);
+
+                if decrypted.len() <= data.len() {
+                    data[..decrypted.len()].copy_from_slice(&decrypted);
+                    Ok(&data[..decrypted.len()])
+                } else {
+                    Err(DecryptError::DecryptionFailure)
+                }
             }
         }
     }
