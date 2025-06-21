@@ -67,7 +67,10 @@ use std::sync::Arc;
 
 pub mod bit_reader;
 pub mod content;
+/// Cryptographic support for PDF decryption
+pub mod crypto;
 pub(crate) mod data;
+mod decrypt;
 pub mod document;
 pub mod filter;
 pub mod function;
@@ -77,7 +80,6 @@ pub mod reader;
 pub mod trivia;
 pub(crate) mod util;
 pub mod xref;
-mod decrypt;
 
 const NUM_SLOTS: usize = 10000;
 

@@ -46,7 +46,7 @@ impl<'a> Dict<'a> {
     pub(crate) fn data(&self) -> &'a [u8] {
         self.0.data
     }
-    
+
     pub(crate) fn ctx(&self) -> ReaderContext<'a> {
         self.0.ctx
     }

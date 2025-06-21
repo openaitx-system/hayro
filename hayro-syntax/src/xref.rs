@@ -2,20 +2,22 @@
 
 use crate::PdfData;
 use crate::data::Data;
-use crate::object::{string, ObjectIdentifier};
+use crate::decrypt::{CryptDict, Decoder};
 use crate::object::array::Array;
 use crate::object::dict::Dict;
-use crate::object::dict::keys::{ENCRYPT, FIRST, ID, INDEX, N, PAGES, PREV, ROOT, SIZE, W, XREF_STM};
+use crate::object::dict::keys::{
+    ENCRYPT, FIRST, ID, INDEX, N, PAGES, PREV, ROOT, SIZE, W, XREF_STM,
+};
 use crate::object::indirect::IndirectObject;
 use crate::object::stream::Stream;
 use crate::object::{Object, ObjectLike};
+use crate::object::{ObjectIdentifier, string};
 use crate::reader::{Readable, Reader, ReaderContext};
 use log::{error, warn};
 use rustc_hash::FxHashMap;
 use std::cmp::max;
 use std::iter;
 use std::sync::{Arc, RwLock};
-use crate::decrypt::{CryptDict, Decoder};
 
 pub(crate) const XREF_ENTRY_LEN: usize = 20;
 
@@ -112,7 +114,7 @@ impl XRef {
 
         let td = TrailerData {
             pages_ref: pages_ref.into(),
-            decoder
+            decoder,
         };
 
         match &mut xref.0 {
@@ -142,21 +144,21 @@ impl XRef {
             Inner::Some { trailer_data, .. } => trailer_data,
         }
     }
-    
+
     pub(crate) fn needs_decryption(&self) -> bool {
         match &self.0 {
             Inner::Dummy => false,
             Inner::Some { trailer_data, .. } => trailer_data.decoder.is_some(),
         }
     }
-    
+
     pub(crate) fn decrypt<'b>(&self, id: ObjectIdentifier, data: &'b mut [u8]) -> Option<&'b [u8]> {
         match &self.0 {
             Inner::Dummy => Some(data),
             Inner::Some { trailer_data, .. } => {
                 if let Some(decoder) = trailer_data.decoder.as_ref() {
                     decoder.decrypt(id, data).ok()
-                }   else {
+                } else {
                     Some(data)
                 }
             }

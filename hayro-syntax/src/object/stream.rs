@@ -16,7 +16,7 @@ use std::fmt::{Debug, Formatter};
 pub struct Stream<'a> {
     dict: Dict<'a>,
     data: &'a [u8],
-    obj_id: Option<ObjectIdentifier>
+    obj_id: Option<ObjectIdentifier>,
 }
 
 impl<'a> Stream<'a> {
@@ -44,7 +44,7 @@ impl<'a> Stream<'a> {
         let xref = self.dict.ctx().xref;
         // Inline images won't have encryption, so check whether object ID is `Some`.
         let mut needs_decryption = xref.needs_decryption() && self.obj_id.is_some();
-        
+
         if let Some(filter) = self
             .dict
             .get::<Name>(F)
@@ -52,17 +52,18 @@ impl<'a> Stream<'a> {
             .and_then(|n| Filter::from_name(n))
         {
             needs_decryption &= filter != Filter::Crypt;
-            
+
             let params = self
                 .dict
                 .get::<Dict>(DP)
-                .or_else(|| self.dict.get::<Dict>(DECODE_PARMS)).unwrap_or_default();
+                .or_else(|| self.dict.get::<Dict>(DECODE_PARMS))
+                .unwrap_or_default();
 
             if needs_decryption {
                 let mut data = self.data.to_vec();
-                
-                filter.apply(xref.decrypt(self.obj_id?, &mut data,)?, params)
-            }   else {
+
+                filter.apply(xref.decrypt(self.obj_id?, &mut data)?, params)
+            } else {
                 filter.apply(self.data, params)
             }
         } else if let Some(filters) = self
@@ -80,14 +81,14 @@ impl<'a> Stream<'a> {
                 .or_else(|| self.dict.get::<Array>(DECODE_PARMS))
                 .map(|a| a.iter::<Object>().collect())
                 .unwrap_or(vec![]);
-            
+
             needs_decryption &= filters.first().map(|e| *e != Filter::Crypt).unwrap_or(true);
 
             let mut current: Option<FilterResult> = None;
-            
+
             if needs_decryption {
                 let mut data = self.data.to_vec();
-                
+
                 current = Some(FilterResult {
                     data: xref.decrypt(self.obj_id?, &mut data)?.to_vec(),
                     color_space: None,
@@ -117,11 +118,11 @@ impl<'a> Stream<'a> {
             let data = if needs_decryption {
                 let mut data = self.data.to_vec();
 
-                xref.decrypt(self.obj_id?, &mut data,)?.to_vec()
-            }   else {
+                xref.decrypt(self.obj_id?, &mut data)?.to_vec()
+            } else {
                 self.data.to_vec()
             };
-            
+
             Some(FilterResult {
                 data,
                 color_space: None,
@@ -130,7 +131,11 @@ impl<'a> Stream<'a> {
         }
     }
 
-    pub(crate) fn from_raw(data: &'a [u8], dict: Dict<'a>, obj_id: Option<ObjectIdentifier>) -> Self {
+    pub(crate) fn from_raw(
+        data: &'a [u8],
+        dict: Dict<'a>,
+        obj_id: Option<ObjectIdentifier>,
+    ) -> Self {
         Self { dict, data, obj_id }
     }
 }
@@ -185,11 +190,15 @@ fn parse_proper<'a>(r: &mut Reader<'a>, dict: &Dict<'a>, ctx: ReaderContext) -> 
     Some(Stream {
         data,
         dict: dict.clone(),
-        obj_id: ctx.obj_number
+        obj_id: ctx.obj_number,
     })
 }
 
-fn parse_fallback<'a>(r: &mut Reader<'a>, dict: &Dict<'a>, ctx: ReaderContext) -> Option<Stream<'a>> {
+fn parse_fallback<'a>(
+    r: &mut Reader<'a>,
+    dict: &Dict<'a>,
+    ctx: ReaderContext,
+) -> Option<Stream<'a>> {
     while r.forward_tag(b"stream").is_none() {
         r.read_byte()?;
     }
@@ -215,7 +224,7 @@ fn parse_fallback<'a>(r: &mut Reader<'a>, dict: &Dict<'a>, ctx: ReaderContext) -
             let stream = Stream {
                 data,
                 dict: dict.clone(),
-                obj_id: ctx.obj_number
+                obj_id: ctx.obj_number,
             };
 
             // Try decoding the stream to see if it is valid.
